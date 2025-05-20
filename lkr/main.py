@@ -4,6 +4,7 @@ import pathlib
 from dataclasses import dataclass
 from enum import Enum
 from typing import Annotated, List, Optional
+from lkr.utils.attribute_utils import process_attributes
 
 import looker_sdk
 import typer
@@ -139,7 +140,13 @@ def load_test(
             help="Looker attributes to run the test on. Specify them as attribute:value like --attribute store:value. Excepts multiple arguments --attribute store:acme --attribute team:managers. Accepts random.randint(0,1000) format"
         ),
     ] = None,
+    attribute_csv: Optional[str] = typer.Option(
+        None, "--attribute-csv", help="Path to CSV file containing user attributes"
+    ),
 ):
+    # Process attributes from CSV and command line
+    processed_attributes = process_attributes(attribute, attribute_csv)
+
     from locust import events
     from locust.env import Environment
 
@@ -161,7 +168,7 @@ def load_test(
     class DashboardUserClass(DashboardUser):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.attributes = attribute
+            self.processed_attributes = processed_attributes  # Use processed attributes
             self.dashboard = dashboard
             self.models = model
 
@@ -211,6 +218,9 @@ def load_test_query(
             help="Looker attributes to run the test on. Specify them as attribute:value like --attribute store:value. Excepts multiple arguments --attribute store:acme --attribute team:managers. Accepts random.randint(0,1000) format"
         ),
     ] = [],
+    attribute_csv: Optional[str] = typer.Option(
+        None, "--attribute-csv", help="Path to CSV file containing user attributes"
+    ),
     wait_time_min: Annotated[
         int,
         typer.Option(
@@ -243,6 +253,9 @@ def load_test_query(
         ),
     ] = 120,
 ):
+    # Process attributes from CSV and command line
+    processed_attributes = process_attributes(attribute, attribute_csv)
+    
     if not query:
         raise typer.BadParameter("At least one --query must be provided")
     if not model:
@@ -254,7 +267,7 @@ def load_test_query(
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.attributes = attribute
+            self.attributes = processed_attributes  # Use processed attributes
             self.qid = query
             self.models = model
             self.result_format = "json_bi"
@@ -314,6 +327,9 @@ def load_test_render(
             help="Looker attributes to run the test on. Specify them as attribute:value like --attribute store:value. Excepts multiple arguments --attribute store:acme --attribute team:managers. Accepts random.randint(0,1000) format"
         ),
     ] = [],
+    attribute_csv: Optional[str] = typer.Option(
+        None, "--attribute-csv", help="Path to CSV file containing user attributes"
+    ),
     result_format: Annotated[
         str,
         typer.Option(
@@ -333,6 +349,9 @@ def load_test_render(
         ),
     ] = False,
 ):
+    # Process attributes from CSV and command line
+    processed_attributes = process_attributes(attribute, attribute_csv)
+    
     if not dashboard:
         raise typer.BadParameter("--dashboard must be provided")
     if not model:
@@ -344,7 +363,7 @@ def load_test_render(
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.attributes = attribute
+            self.attributes = processed_attributes  # Use processed attributes 
             self.dashboard = dashboard
             self.models = model
             self.result_format = result_format
@@ -419,6 +438,9 @@ def load_test_embed_observability(
             help="Looker attributes to run the test on. Specify them as attribute:value like --attribute store:value. Excepts multiple arguments --attribute store:acme --attribute team:managers. Accepts random.randint(0,1000) format"
         ),
     ] = [],
+    attribute_csv: Optional[str] = typer.Option(
+        None, "--attribute-csv", help="Path to CSV file containing user attributes"
+    ),
     log_event_prefix: Annotated[
         str,
         typer.Option(
@@ -452,6 +474,8 @@ def load_test_embed_observability(
     
     \f
     """
+    # Process attributes from CSV and command line
+    processed_attributes = process_attributes(attribute, attribute_csv)
     
     import threading
 
@@ -465,7 +489,7 @@ def load_test_embed_observability(
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.attributes = attribute
+            self.attributes = processed_attributes  # Use processed attributes
             self.dashboard = dashboard
             self.models = model
             self.completion_timeout = completion_timeout
