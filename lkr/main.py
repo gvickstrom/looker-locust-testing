@@ -4,7 +4,8 @@ import pathlib
 from dataclasses import dataclass
 from enum import Enum
 from typing import Annotated, List, Optional
-from lkr.utils.attribute_utils import process_attributes
+from lkr.utils.attribute_utils import process_attributes_with_cloud_storage
+from lkr.cloud_storage import UserAttributesManager
 
 import looker_sdk
 import typer
@@ -18,6 +19,9 @@ from lkr.utils.validate_api import validate_api_credentials
 from lkr.load_test.locustfile_qid import QueryUser
 from locust import events
 from locust.env import Environment
+
+import requests
+import logging
 
 app = typer.Typer(name="lkr", no_args_is_help=True)
 state = {"client_id": False}
@@ -68,6 +72,22 @@ def main(
         typer.Option(help="Looker API base URL"),
     ] = None,
 ):
+    # IP DETECTION CODE - runs at the start of every command
+    print("=== CLOUD RUN ORIGIN DETECTION ===", flush=True)
+    try:
+        ip_response = requests.get('https://httpbin.org/ip', timeout=10)
+        origin_ip = ip_response.json()['origin']
+        print(f"Cloud Run job IP: {origin_ip}", flush=True)
+        
+        headers_response = requests.get('https://httpbin.org/headers', timeout=10)
+        print(f"Request headers: {headers_response.json()}", flush=True)
+        
+    except Exception as e:
+        print(f"Failed to get origin info: {e}", flush=True)
+    
+    print("=== END ORIGIN DETECTION ===", flush=True)
+    
+    # Rest of the existing callback code
     load_dotenv(dotenv_path=env_file, override=True)
     if ctx.invoked_subcommand in ["load-test", "load-test:query", "debug"]:
         validate_api_credentials(
@@ -100,13 +120,46 @@ def debug(
             typer.echo(f"LOOKERSDK_BASE_URL: {os.environ['LOOKERSDK_BASE_URL']}")
         else:
             typer.echo("LOOKERSDK_BASE_URL: Not set")
-        typer.echo("\nChecking Looker Credentials\n")
+        
+        # Enhanced CSV debugging
+        typer.echo("\n=== CSV User Attributes Testing ===")
+        if os.environ.get("BUCKET_NAME"):
+            typer.echo(f"BUCKET_NAME: {os.environ.get('BUCKET_NAME')}")
+            try:
+                manager = UserAttributesManager(os.environ.get('BUCKET_NAME'))
+                typer.echo(f"✅ CSV loaded successfully: {len(manager.user_attributes)} users")
+                
+                if manager.user_attributes:
+                    # Show first 3 sample users
+                    typer.echo("Sample user attributes from CSV:")
+                    for i, user_data in enumerate(manager.user_attributes[:3]):
+                        typer.echo(f"  User {i+1}: {user_data}")
+                    
+                    # Test the random selection
+                    typer.echo("\nTesting random user selection:")
+                    for i in range(3):
+                        random_user = manager.get_random_user_attributes()
+                        typer.echo(f"  Random user {i+1}: {random_user}")
+                        
+                    # Show available attribute names
+                    if manager.user_attributes:
+                        attr_names = list(manager.user_attributes[0].keys())
+                        typer.echo(f"\nAvailable CSV columns: {attr_names}")
+                else:
+                    typer.echo("❌ No user data found in CSV")
+                    
+            except Exception as e:
+                typer.echo(f"❌ Error loading CSV from cloud storage: {str(e)}")
+        else:
+            typer.echo("❌ BUCKET_NAME not set")
+        
+        typer.echo("\n=== Checking Looker Credentials ===")
         try:
             looker_client = looker_sdk.init40()
             response = looker_client.me()
-            typer.echo(f"Logged in as {response['first_name']} {response.last_name}")
+            typer.echo(f"✅ Logged in as {response['first_name']} {response.last_name}")
         except Exception as e:
-            typer.echo(f"Error logging in to Looker: {str(e)}")
+            typer.echo(f"❌ Error logging in to Looker: {str(e)}")
 
 
 @app.command(name="load-test")
@@ -145,7 +198,21 @@ def load_test(
     ),
 ):
     # Process attributes from CSV and command line
-    processed_attributes = process_attributes(attribute, attribute_csv)
+    processed_attributes = process_attributes_with_cloud_storage(
+        attribute, 
+        attribute_csv, 
+        os.environ.get('BUCKET_NAME')
+    )
+
+    # Add detailed logging about attributes
+    typer.echo(f"\n🔍 Processed attributes for load test: {processed_attributes}")
+    if processed_attributes:
+        typer.echo(f"✅ {len(processed_attributes)} attributes will be assigned to users")
+        for attr in processed_attributes:
+            typer.echo(f"   - {attr}")
+    else:
+        typer.echo("⚠️  No attributes configured - users will have no context")
+    typer.echo("")  # blank line
 
     from locust import events
     from locust.env import Environment
@@ -168,7 +235,25 @@ def load_test(
     class DashboardUserClass(DashboardUser):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.processed_attributes = processed_attributes  # Use processed attributes
+            
+            # Get random attributes for THIS user from CSV
+            if os.environ.get('BUCKET_NAME'):
+                try:
+                    from lkr.cloud_storage import UserAttributesManager
+                    manager = UserAttributesManager(os.environ.get('BUCKET_NAME'))
+                    user_attrs = manager.get_random_user_attributes()
+                    if user_attrs:
+                        # Convert dict to list of "name:value" strings
+                        self.attributes = [f"{k}:{v}" for k, v in user_attrs.items()]
+                        print(f"DEBUG: User {self.user_id} got random attributes: {self.attributes}")
+                    else:
+                        self.attributes = []
+                except Exception as e:
+                    print(f"ERROR: Could not get random attributes: {e}")
+                    self.attributes = []
+            else:
+                self.attributes = []
+                
             self.dashboard = dashboard
             self.models = model
 
@@ -254,7 +339,21 @@ def load_test_query(
     ] = 120,
 ):
     # Process attributes from CSV and command line
-    processed_attributes = process_attributes(attribute, attribute_csv)
+    processed_attributes = process_attributes_with_cloud_storage(
+        attribute, 
+        attribute_csv, 
+        os.environ.get('BUCKET_NAME')
+    )
+    
+    # Add detailed logging about attributes
+    typer.echo(f"\n🔍 Processed attributes for query load test: {processed_attributes}")
+    if processed_attributes:
+        typer.echo(f"✅ {len(processed_attributes)} attributes will be assigned to users")
+        for attr in processed_attributes:
+            typer.echo(f"   - {attr}")
+    else:
+        typer.echo("⚠️  No attributes configured - users will have no context")
+    typer.echo("")  # blank line
     
     if not query:
         raise typer.BadParameter("At least one --query must be provided")
@@ -350,7 +449,21 @@ def load_test_render(
     ] = False,
 ):
     # Process attributes from CSV and command line
-    processed_attributes = process_attributes(attribute, attribute_csv)
+    processed_attributes = process_attributes_with_cloud_storage(
+        attribute, 
+        attribute_csv, 
+        os.environ.get('BUCKET_NAME')
+    )
+    
+    # Add detailed logging about attributes
+    typer.echo(f"\n🔍 Processed attributes for render load test: {processed_attributes}")
+    if processed_attributes:
+        typer.echo(f"✅ {len(processed_attributes)} attributes will be assigned to users")
+        for attr in processed_attributes:
+            typer.echo(f"   - {attr}")
+    else:
+        typer.echo("⚠️  No attributes configured - users will have no context")
+    typer.echo("")  # blank line
     
     if not dashboard:
         raise typer.BadParameter("--dashboard must be provided")
@@ -475,7 +588,21 @@ def load_test_embed_observability(
     \f
     """
     # Process attributes from CSV and command line
-    processed_attributes = process_attributes(attribute, attribute_csv)
+    processed_attributes = process_attributes_with_cloud_storage(
+        attribute, 
+        attribute_csv, 
+        os.environ.get('BUCKET_NAME')
+    )
+    
+    # Add detailed logging about attributes
+    typer.echo(f"\n🔍 Processed attributes for embed observability test: {processed_attributes}")
+    if processed_attributes:
+        typer.echo(f"✅ {len(processed_attributes)} attributes will be assigned to users")
+        for attr in processed_attributes:
+            typer.echo(f"   - {attr}")
+    else:
+        typer.echo("⚠️  No attributes configured - users will have no context")
+    typer.echo("")  # blank line
     
     import threading
 
@@ -519,4 +646,4 @@ def load_test_embed_observability(
 
 
 if __name__ == "__main__":
-    typer.run(app)
+    app()

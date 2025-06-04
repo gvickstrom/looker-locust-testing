@@ -10,3 +10,14 @@ wheels/
 .venv
 .env
 .pytest_cache
+
+# Service account keys - NEVER commit these
+service-account-key.json
+*.json
+!package*.json
+!pyproject.toml
+
+# Environment files
+.env
+.env.local
+.env.*.local

@@ -62,14 +62,19 @@ def format_attributes(
                     split_attr[1] = val
                     formatted_attributes[split_attr[0]] = split_attr[1]
                 else:
-                    valid = False
+                    # NOT invalid - just a regular CSV value!
+                    # Accept CSV attributes as-is (they're already properly formatted)
+                    formatted_attributes[split_attr[0]] = split_attr[1]
+                    print(f"DEBUG: Accepted CSV attribute: {split_attr[0]} = {split_attr[1]}")
+                    valid = True
             else:
                 valid = False
-            if valid:
-                formatted_attributes[split_attr[0]] = split_attr[1]
-            else:
+            
+            # Remove the duplicate assignment - it was causing issues
+            if not valid:
                 invalid_attribute_format(attr)
 
+    print(f"DEBUG: Final formatted_attributes: {formatted_attributes}")
     return formatted_attributes
 
 
